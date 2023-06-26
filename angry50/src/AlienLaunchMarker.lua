@@ -25,8 +25,14 @@ function AlienLaunchMarker:init(world)
     -- whether we launched the alien and should stop rendering the preview
     self.launched = false
 
+    -- if the alien has been spol
+    self.split = false
+
     -- our alien we will eventually spawn
     self.alien = nil
+    self.aliens = {}
+    
+
 end
 
 function AlienLaunchMarker:update(dt)
@@ -48,6 +54,8 @@ function AlienLaunchMarker:update(dt)
             -- spawn new alien in the world, passing in user data of player
             self.alien = Alien(self.world, 'round', self.shiftedX, self.shiftedY, 'Player')
 
+            local alien = self.alien
+
             -- apply the difference between current X,Y and base X,Y as launch vector impulse
             self.alien.body:setLinearVelocity((self.baseX - self.shiftedX) * 10, (self.baseY - self.shiftedY) * 10)
 
@@ -57,6 +65,9 @@ function AlienLaunchMarker:update(dt)
 
             -- we're no longer aiming
             self.aiming = false
+
+
+            table.insert(self.aliens, alien)
 
         -- re-render trajectory
         elseif self.aiming then

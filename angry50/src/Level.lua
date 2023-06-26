@@ -6,6 +6,11 @@
     cogden@cs50.harvard.edu
 ]]
 
+
+local tries = 3
+local collision = false
+local nonPlayer = nil
+
 Level = Class{}
 
 function Level:init()
@@ -27,6 +32,7 @@ function Level:init()
 
         -- if we collided between both the player and an obstacle...
         if types['Obstacle'] and types['Player'] then
+            collision = true
 
             -- grab the body that belongs to the player
             local playerFixture = a:getUserData() == 'Player' and a or b
@@ -43,6 +49,7 @@ function Level:init()
 
         -- if we collided between an obstacle and an alien, as by debris falling...
         if types['Obstacle'] and types['Alien'] then
+            collision = true
 
             -- grab the body that belongs to the player
             local obstacleFixture = a:getUserData() == 'Obstacle' and a or b
@@ -55,10 +62,13 @@ function Level:init()
             if sumVel > 20 then
                 table.insert(self.destroyedBodies, alienFixture:getBody())
             end
+
+            table.insert(self.aliens, 1, nil)
         end
 
         -- if we collided between the player and the alien...
         if types['Player'] and types['Alien'] then
+            collision = true
 
             -- grab the bodies that belong to the player and alien
             local playerFixture = a:getUserData() == 'Player' and a or b
@@ -71,13 +81,18 @@ function Level:init()
             if sumVel > 20 then
                 table.insert(self.destroyedBodies, alienFixture:getBody())
             end
+            
+            table.insert(self.aliens, 1, nil)
         end
 
         -- if we hit the ground, play a bounce sound
         if types['Player'] and types['Ground'] then
             gSounds['bounce']:stop()
             gSounds['bounce']:play()
+            collision = true
         end
+
+        
     end
 
     -- the remaining three functions here are sample definitions, but we are not
@@ -110,6 +125,8 @@ function Level:init()
     -- simple edge shape to represent collision for ground
     self.edgeShape = love.physics.newEdgeShape(0, 0, VIRTUAL_WIDTH * 3, 0)
 
+    
+
     -- spawn an alien to try and destroy
     table.insert(self.aliens, Alien(self.world, 'square', VIRTUAL_WIDTH - 80, VIRTUAL_HEIGHT - TILE_SIZE - ALIEN_SIZE / 2, 'Alien'))
 
@@ -135,6 +152,8 @@ function Level:update(dt)
     
     -- update launch marker, which shows trajectory
     self.launchMarker:update(dt)
+
+    table.insert(self.aliens, self.launchMarker.alien)
 
     -- Box2D world update code; resolves collisions and processes callbacks
     self.world:update(dt)
@@ -163,7 +182,7 @@ function Level:update(dt)
 
     -- remove all destroyed aliens from level
     for i = #self.aliens, 1, -1 do
-        if self.aliens[i].body:isDestroyed() then
+        if i ~= 1 and self.aliens[i].body:isDestroyed() then
             table.remove(self.aliens, i)
             gSounds['kill']:stop()
             gSounds['kill']:play()
@@ -172,20 +191,63 @@ function Level:update(dt)
 
     -- replace launch marker if original alien stopped moving
     if self.launchMarker.launched then
-        local xPos, yPos = self.launchMarker.alien.body:getPosition()
-        local xVel, yVel = self.launchMarker.alien.body:getLinearVelocity()
-        
-        -- if we fired our alien to the left or it's almost done rolling, respawn
-        if xPos < 0 or (math.abs(xVel) + math.abs(yVel) < 1.5) then
-            self.launchMarker.alien.body:destroy()
-            self.launchMarker = AlienLaunchMarker(self.world)
+        if love.keyboard.wasPressed('space') and not collision and not self.launchMarker.split then
+            print("break into three here")
+            self.launchMarker.split = true
+            local bodyX = self.aliens[2].body:getX()
+            local bodyY = self.aliens[2].body:getY()
 
-            -- re-initialize level if we have no more aliens
-            if #self.aliens == 0 then
-                gStateMachine:change('start')
+
+            local topAlien = Alien(self.world, 'round', bodyX, bodyY - 40, 'Player')
+            local bottomAlien = Alien(self.world, 'round', bodyX, bodyY + 36, 'Player')
+
+            topAlien.body:setLinearVelocity((self.launchMarker.baseX - self.launchMarker.shiftedX) * 10, (self.launchMarker.baseY - self.launchMarker.shiftedY) * 10)
+            bottomAlien.body:setLinearVelocity((self.launchMarker.baseX - self.launchMarker.shiftedX) * 10, (self.launchMarker.baseY - self.launchMarker.shiftedY) * 10)
+            topAlien.launched = true
+            bottomAlien.launched = true
+
+            -- make the alien pretty bouncy
+            topAlien.fixture:setRestitution(0.4)
+            bottomAlien.fixture:setRestitution(0.4)
+            topAlien.body:setAngularDamping(1)
+            bottomAlien.body:setAngularDamping(1)
+
+            table.insert(self.aliens, topAlien)
+            table.insert(self.aliens, bottomAlien)
+
+            
+        end
+
+        
+        for i = 1 , 10 do 
+            local alien = self.aliens[i]
+            if alien and alien.fixture and not alien.fixture:isDestroyed() and alien.fixture:getUserData() == "Player" then
+                local xPos, yPos = alien.body:getPosition()
+                local xVel, yVel = alien.body:getLinearVelocity()
+                if xPos < 0 or (math.abs(xVel) + math.abs(yVel) < 1) then
+                    alien.body:destroy()
+                    table.remove(self.aliens, i)
+
+                    if self.launchMarker.alien ~= nil then 
+                        if self.launchMarker.alien.body:isDestroyed() then
+                            tries = tries - 1
+                            self.launchMarker = AlienLaunchMarker(self.world)
+                            collision = false
+                        end
+                        if tries == 0 or self.aliens[1] == nil then
+                            tries = 3
+                            gStateMachine:change('start')
+                        end
+                    end
+                end
             end
         end
+
+
+        
     end
+
+
 end
 
 function Level:render()
@@ -214,8 +276,23 @@ function Level:render()
         love.graphics.setColor(1, 1, 1, 1)
     end
 
+
+    if tries > 0 then 
+        love.graphics.setFont(gFonts['medium'])
+        love.graphics.setColor(0, 0, 0, 1)
+        love.graphics.printf("Lives remainging: "..tries, 0, 16, VIRTUAL_WIDTH, 'center')
+        love.graphics.setColor(1, 1, 1, 1)
+    end
+
     -- render victory text if all aliens are dead
-    if #self.aliens == 0 then
+    local nonPlayerCount = 0
+    for k, alien in pairs(self.aliens) do
+        if alien and alien.fixture and not alien.fixture:isDestroyed() and alien.fixture:getUserData() == "Alien" then
+            nonPlayerCount = nonPlayerCount + 1
+        end
+    end
+
+    if nonPlayerCount == 0 and self.launchMarker.launched then 
         love.graphics.setFont(gFonts['huge'])
         love.graphics.setColor(0, 0, 0, 1)
         love.graphics.printf('VICTORY', 0, VIRTUAL_HEIGHT / 2 - 32, VIRTUAL_WIDTH, 'center')
